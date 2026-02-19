@@ -32,24 +32,24 @@ This study compares the cost-effectiveness of various typhoid conjugate vaccine 
 
 ## File descriptions
 #### *Transmission_dynamic_model folder* <br>
-  **run_Parallel_1000_slow.R** runs... <br>  
-  **run_Parallel_1000_fast.R** runs... <br>  
-  **parallelization_slow.R** runs... <br>  
-  **parallelization_fast.R** runs... <br>  
-  **typhoid_ode_slow_waning.R** runs... <br>  
-  **typhoid_ode_fast_waning.R** runs... <br>  
-  **search_grid_slow.Rdata** is... <br>  
-  **search_grid_fast.Rdata** is... <br>  
+  ##### **run_Parallel_1000_slow.R** runs... <br>  
+  ##### **run_Parallel_1000_fast.R** runs... <br>  
+  ##### **parallelization_slow.R** runs... <br>  
+  ##### **parallelization_fast.R** runs... <br>  
+  ##### **typhoid_ode_slow_waning.R** runs... <br>  
+  ##### **typhoid_ode_fast_waning.R** runs... <br>  
+  ##### **search_grid_slow.Rdata** is... <br>  
+  ##### **search_grid_fast.Rdata** is... <br>  
 #### *Process_TDM_output folder* <br>
-  **Process_Results.Rmd** runs... <br>  
-  **post_count_doses_by_year.R** runs... <br>  
-  **post_cases_per_year.R** runs... <br>  
+  ##### **Process_Results.Rmd** runs... <br>  
+  ##### **post_count_doses_by_year.R** runs... <br>  
+  ##### **post_cases_per_year.R** runs... <br>  
 #### *Cost_effectiveness_model folder* <br>
-  **load_data.R** runs... <br>  
-  **MakeDoses.R** runs... <br>  
-  **MakeCases.R** runs... <br>  
-  **CEA_Parameters.Rmd** runs... <br>  
-  **CEA_Model_Calculations.Rmd** runs... <br> 
+  ##### **load_data.R** runs... <br>  
+  ##### **MakeDoses.R** runs... <br>  
+  ##### **MakeCases.R** runs... <br>  
+  ##### **CEA_Parameters.Rmd** runs... <br>  
+  ##### **CEA_Model_Calculations.Rmd** runs... <br> 
 
 
 All model specifics and parameters are detailed in the manuscript and supplemental files published HERE. 
