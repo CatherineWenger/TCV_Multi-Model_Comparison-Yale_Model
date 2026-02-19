@@ -1,0 +1,355 @@
+--- 
+title: "Calculate costs and health outcomes"
+author: "Catherine Wenger"
+date: "2025 - 02 - 26"
+output: html_document
+--- 
+
+###############################################################################
+# Evaluating the Impact and Cost-Effectiveness of Typhoid Conjugate Vaccine 
+#   Schedules across Diverse Settings: a Multi-Model Comparison
+# 
+# Code to run the cost-effectiveness analyses and get output (costs and health outcomes)
+#
+# Created: Catherine Wenger Jan 2025
+###############################################################################
+
+```{r setup, include =FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Set up code
+```{r}
+## Dimensions of each array that corresponds to a parameter
+arraydim =  c(length(geonames),length(incidencenames),length(scennames),
+              length(samplenames),length(vacstratnames),length(yearnames))
+
+## load and separate out data/parameters and discounting arrays created in CEA_Parameters.R
+load(paste0(wddata,"/par_arrays.Rdata"))
+  discountratecostarray <-  output[[2]]
+  discountrateeffectarray <-  output[[1]]
+  inputpararray <-  output[[3]]
+```
+
+### Disease incidence & healthcare use
+```{r}
+### Antimicrobial sensitive (AMS) cases
+cases =          inputpararray['I_cases',,,,,,]               # total cases
+cases0_2 =       inputpararray['I_cases0_2',,,,,,]            # cases for ages 0-2y
+cases2_5 =       inputpararray['I_cases2_5',,,,,,]            # cases for ages 2-<5y
+cases5_10 =      inputpararray['I_cases5_10',,,,,,]           # cases for ages 5-<10y
+cases10_15 =     inputpararray['I_cases10_15',,,,,,]          # cases for ages 10-<15y
+cases15under =   cases0_2 + cases2_5 + cases5_10 + cases10_15 # cases for ages under 15y
+cases15over =    inputpararray['I_cases15over',,,,,,]         # cases for ages over 15y
+
+casesAMS =       cases          # antimicrobial sensitive cases
+cases15underAMS = cases15under  # antimicrobial sensitive cases under 15y
+cases15overAMS = cases15over    # antimicrobial sensitive cases over 15y
+casesAMS_disc =  casesAMS       # discounted AMS cases
+
+### Health care use
+medcasesAMS =         casesAMS * inputpararray['pr_seek',,,,,,]               # # cases that get Rx
+hospcasesAMS =        medcasesAMS * inputpararray['pr_inpt',,,,,,]            # # cases that get inpatient Rx
+hospcasesAMS_comp =   hospcasesAMS * inputpararray['pr_complications',,,,,,]  # # cases w/ complications
+hospcasesAMS_nocomp = hospcasesAMS - hospcasesAMS_comp                        # # cases w/o complications
+outcasesAMS =         medcasesAMS - hospcasesAMS                              # # cases that get outpatient Rx
+nomedcasesAMS =       casesAMS - medcasesAMS                                  # # cases that don't get Rx
+nohospcasesAMS =      outcasesAMS + nomedcasesAMS                             # # cases that were not hospitalized
+## Discounting
+medcasesAMS_disc =          medcasesAMS * discountrateeffectarray[,,,,,]         # discounted # cases with Rx
+hospcasesAMS_disc =         hospcasesAMS * discountrateeffectarray[,,,,,]        # discounted # inpatient cases 
+hospcasesAMS_comp_disc =    hospcasesAMS_comp * discountrateeffectarray[,,,,,]   # discounted # inpt cases w/ complications
+hospcasesAMS_nocomp_disc =  hospcasesAMS_nocomp * discountrateeffectarray[,,,,,] # discounted # inpt cases w/o complications
+outcasesAMS_disc =          outcasesAMS * discountrateeffectarray[,,,,,]         # discounted # outpatient cases 
+nomedcasesAMS_disc =        nomedcasesAMS * discountrateeffectarray[,,,,,]       # discounted # no Rx cases 
+nohospcasesAMS_disc =       nohospcasesAMS * discountrateeffectarray[,,,,,]      # discounted # no inpatient Rx cases  
+```
+
+### Treatment costs
+```{r}
+### AMS cases
+## tot $ of inpatient cases w/o complications
+inpatientcostAMS_nocomp =   (cases15underAMS * inputpararray['pr_seek',,,,,,] * inputpararray['pr_inpt',,,,,,] *
+                            (1 - inputpararray['pr_complications',,,,,,]) * inputpararray['cost_inpt_noComp_trt15u',,,,,,]) + 
+                            (cases15overAMS * inputpararray['pr_seek',,,,,,] * inputpararray['pr_inpt',,,,,,] * 
+                            (1 - inputpararray['pr_complications',,,,,,]) * inputpararray['cost_inpt_noComp_trt15o',,,,,,])  
+## tot $ of inpatient cases w/ complications
+inpatientcostAMS_comp =     (cases15underAMS * inputpararray['pr_seek',,,,,,] * inputpararray['pr_inpt',,,,,,] *  
+                            inputpararray['pr_complications',,,,,,] * inputpararray['cost_inpt_comp_trt15u',,,,,,]) +
+                            (cases15overAMS * inputpararray['pr_seek',,,,,,] * inputpararray['pr_inpt',,,,,,] * 
+                            inputpararray['pr_complications',,,,,,] * inputpararray['cost_inpt_comp_trt15o',,,,,,])  
+## total cost of inpatient cases
+totinpatientcostAMS =       inpatientcostAMS_nocomp + inpatientcostAMS_comp          
+## total cost of outpatient cases
+totoutpatientcostAMS =      (cases15underAMS * inputpararray['pr_seek',,,,,,] * inputpararray['pr_outpt',,,,,,] * 
+                            inputpararray['cost_outpt_trt15u',,,,,,]) + 
+                            (cases15overAMS * inputpararray['pr_seek',,,,,,] * inputpararray['pr_outpt',,,,,,] *
+                            inputpararray['cost_outpt_trt15o',,,,,,])     
+## total $ of untreated cases
+totnomedcostAMS =           (cases15underAMS * (1 - inputpararray['pr_seek',,,,,,]) *
+                            inputpararray['cost_no_trt15u',,,,,,]) + 
+                            (cases15overAMS * (1 - inputpararray['pr_seek',,,,,,]) *
+                            inputpararray['cost_no_trt15o',,,,,,])           
+## total cost of treatment
+tottreatmentcostAMS =       totinpatientcostAMS + totoutpatientcostAMS + totnomedcostAMS    
+
+## Discounting treatment costs
+inpatientcostAMS_nocomp_disc =  inpatientcostAMS_nocomp * discountratecostarray[,,,,,]  # discounted total cost of inpt cases w/o complications
+inpatientcostAMS_comp_disc =    inpatientcostAMS_comp * discountratecostarray[,,,,,]    # discounted total cost of inpt cases w/ complications
+totinpatientcostAMS_disc =      totinpatientcostAMS * discountratecostarray[,,,,,]      # discounted total cost of inpatient cases 
+totoutpatientcostAMS_disc =     totoutpatientcostAMS * discountratecostarray[,,,,,]     # discounted total cost of outpatient cases
+totnomedcostAMS_disc =          totnomedcostAMS * discountratecostarray[,,,,,]          # discounted total cost of not treated cases
+tottreatmentcostAMS_disc =      tottreatmentcostAMS * discountratecostarray[,,,,,]      # discounted total cost of treatment
+
+```
+
+### Vaccine related costs
+```{r}
+## Calculate total cost to get each type of dose into the arm of 1 recipient
+price_per_dose_rout =   inputpararray['cost_vax_dose',,,,,,] +  # cost of routine dose +
+                        inputpararray['cost_safty_inj',,,,,,] + # cost of safety/injection +
+                        inputpararray['cost_del_rout',,,,,,]    # cost of routine delivery
+price_per_dose_camp =   inputpararray['cost_vax_dose',,,,,,] +  # cost of campaign dose +
+                        inputpararray['cost_safty_inj',,,,,,] + # cost of safety/injection +
+                        inputpararray['cost_del_camp',,,,,,]    # cost of campaign delivery
+price_per_dose_boost =  inputpararray['cost_vax_dose',,,,,,] +  # cost of booster dose +
+                        inputpararray['cost_safty_inj',,,,,,] + # cost of safety/injection +
+                        inputpararray['cost_del_boost',,,,,,]   # cost of booster delivery
+
+## Total vaccination costs based on number of doses administered
+totcostrout =   inputpararray['I_nrdosesroutine',,,,,,] * price_per_dose_rout   # Total cost of routine vaccination
+totcostcamp =   inputpararray['I_nrdosescampaign',,,,,,] * price_per_dose_camp  # Total cost of campaign vaccination
+totcostboost =  inputpararray['I_nrdosesbooster',,,,,,] * price_per_dose_boost  # Total cost of booster vaccination
+totcostvac =    totcostrout + totcostcamp + totcostboost                        # Total cost of vaccination
+## Discounting vaccination costs
+totcostrout_disc =  totcostrout * discountratecostarray[,,,,,]                # Discounted cost of routine vaccination
+totcostcamp_disc =  totcostcamp * discountratecostarray[,,,,,]                # Discounted cost of campaign vaccination
+totcostboost_disc = totcostboost * discountratecostarray[,,,,,]               # Discounted cost of booster vaccination
+totcostvac_disc =   totcostrout_disc + totcostcamp_disc + totcostboost_disc   # Discounted cost of vaccination
+```
+
+### AMS Age-specific LE at death, Deaths, etc
+```{r}
+## life expectancy
+## the years of life left to live used to calculate years of life lost (YLLs) use 
+## the overall life expectancy and the midpoint of the age band in which the death ocurred
+lifeexpatagedeath =        inputpararray['life_expectancy',,,,,,]
+lifeexpatagedeatht0_2 =    round(lifeexpatagedeath - 1)   # years of life lost for a single case of typhoid
+lifeexpatagedeath0_2 =     ifelse(lifeexpatagedeatht0_2<0,0,lifeexpatagedeatht0_2) # life expectancy at age of death
+lifeexpatagedeatht2_5 =    round(lifeexpatagedeath - 3.5)   # years of life lost for a single case of typhoid
+lifeexpatagedeath2_5 =     ifelse(lifeexpatagedeatht2_5<0,0,lifeexpatagedeatht2_5) # life expectancy at age of death
+lifeexpatagedeatht5_10 =   round(lifeexpatagedeath - 7.5)   # years of life lost for a single case of typhoid
+lifeexpatagedeath5_10 =    ifelse(lifeexpatagedeatht5_10<0,0,lifeexpatagedeatht5_10) # life expectancy at age of death
+lifeexpatagedeatht10_15 =  round(lifeexpatagedeath - 12.5)   # years of life lost for a single case of typhoid
+lifeexpatagedeath10_15 =   ifelse(lifeexpatagedeatht10_15<0,0,lifeexpatagedeatht10_15) # life expectancy at age of death
+lifeexpatagedeatht15over = round(lifeexpatagedeath - 42.5)   # years of life lost for a single case of typhoid
+lifeexpatagedeath15over =  ifelse(lifeexpatagedeatht15over<0,0,lifeexpatagedeatht15over) # life expectancy at age of death
+
+### calculate the number of deaths expected to occurr per age group
+## deaths, ages 0-<2
+deathsAMS0_2 = (cases0_2 * inputpararray['pr_seek',,,,,,] *       # inpatient treatment with no complications * CFR
+                  inputpararray['pr_inpt',,,,,,] * 
+                  inputpararray['pr_complications',,,,,,] *  
+                  inputpararray['pr_death_inpt_comp',,,,,,]) +         
+                (cases0_2 * inputpararray['pr_seek',,,,,,] *      # inpatient treatment with complications * CFR
+                   inputpararray['pr_inpt',,,,,,] * 
+                   (1-inputpararray['pr_complications',,,,,,]) *  
+                   inputpararray['pr_death_inpt_noComp',,,,,,]) +  
+                (cases0_2 * inputpararray['pr_seek',,,,,,] *      # outpatient treatment * CFR
+                   (1-inputpararray['pr_inpt',,,,,,]) * 
+                   inputpararray['pr_death_outpt',,,,,,]) +                                                       
+                (cases0_2 * (1-inputpararray['pr_seek',,,,,,]) *  # no treatment * CFR
+                   inputpararray['pr_death_notrt',,,,,,])                                                         
+## deaths, ages 2-<5
+deathsAMS2_5 = (cases2_5 * inputpararray['pr_seek',,,,,,] *       # inpatient treatment with no complications * CFR
+                  inputpararray['pr_inpt',,,,,,] * 
+                  inputpararray['pr_complications',,,,,,] *  
+                  inputpararray['pr_death_inpt_comp',,,,,,]) +         
+                (cases2_5 * inputpararray['pr_seek',,,,,,] *      # inpatient treatment with complications * CFR
+                   inputpararray['pr_inpt',,,,,,] * 
+                   (1-inputpararray['pr_complications',,,,,,]) *  
+                   inputpararray['pr_death_inpt_noComp',,,,,,]) +  
+                (cases2_5 * inputpararray['pr_seek',,,,,,] *      # outpatient treatment * CFR
+                   (1-inputpararray['pr_inpt',,,,,,]) * 
+                   inputpararray['pr_death_outpt',,,,,,]) +                                                       
+                (cases2_5 * (1-inputpararray['pr_seek',,,,,,]) *  # no treatment * CFR
+                   inputpararray['pr_death_notrt',,,,,,])      
+## deaths, ages 5-<10
+deathsAMS5_10 = (cases5_10 * inputpararray['pr_seek',,,,,,] *     # inpatient treatment with no complications * CFR
+                  inputpararray['pr_inpt',,,,,,] * 
+                  inputpararray['pr_complications',,,,,,] *  
+                  inputpararray['pr_death_inpt_comp',,,,,,]) +         
+                (cases5_10 * inputpararray['pr_seek',,,,,,] *     # inpatient treatment with complications * CFR
+                   inputpararray['pr_inpt',,,,,,] * 
+                   (1-inputpararray['pr_complications',,,,,,]) *  
+                   inputpararray['pr_death_inpt_noComp',,,,,,]) +  
+                (cases5_10 * inputpararray['pr_seek',,,,,,] *     # outpatient treatment * CFR
+                   (1-inputpararray['pr_inpt',,,,,,]) * 
+                   inputpararray['pr_death_outpt',,,,,,]) +                                                       
+                (cases5_10 * (1-inputpararray['pr_seek',,,,,,]) * # no treatment * CFR
+                   inputpararray['pr_death_notrt',,,,,,])
+## deaths, ages 10-<15
+deathsAMS10_15 = (cases10_15 * inputpararray['pr_seek',,,,,,] *    # inpatient treatment with no complications * CFR
+                  inputpararray['pr_inpt',,,,,,] * 
+                  inputpararray['pr_complications',,,,,,] *  
+                  inputpararray['pr_death_inpt_comp',,,,,,]) +         
+                (cases10_15 * inputpararray['pr_seek',,,,,,] *     # inpatient treatment with complications * CFR
+                   inputpararray['pr_inpt',,,,,,] * 
+                   (1-inputpararray['pr_complications',,,,,,]) *  
+                   inputpararray['pr_death_inpt_noComp',,,,,,]) +  
+                (cases10_15 * inputpararray['pr_seek',,,,,,] *     # outpatient treatment * CFR
+                   (1-inputpararray['pr_inpt',,,,,,]) * 
+                   inputpararray['pr_death_outpt',,,,,,]) +                                                       
+                (cases10_15 * (1-inputpararray['pr_seek',,,,,,]) * # no treatment * CFR
+                   inputpararray['pr_death_notrt',,,,,,]) 
+## deaths, ages >15
+deathsAMS15over = (cases15over * inputpararray['pr_seek',,,,,,] *   # inpatient treatment with no complications * CFR
+                  inputpararray['pr_inpt',,,,,,] * 
+                  inputpararray['pr_complications',,,,,,] *  
+                  inputpararray['pr_death_inpt_comp',,,,,,]) +         
+                (cases15over * inputpararray['pr_seek',,,,,,] *     # inpatient treatment with complications * CFR
+                   inputpararray['pr_inpt',,,,,,] * 
+                   (1-inputpararray['pr_complications',,,,,,]) *  
+                   inputpararray['pr_death_inpt_noComp',,,,,,]) +  
+                (cases15over * inputpararray['pr_seek',,,,,,] *     # outpatient treatment * CFR
+                   (1-inputpararray['pr_inpt',,,,,,]) * 
+                   inputpararray['pr_death_outpt',,,,,,]) +                                                       
+                (cases15over * (1-inputpararray['pr_seek',,,,,,]) * # no treatment * CFR
+                   inputpararray['pr_death_notrt',,,,,,])
+
+## create discounting matrix for the life expectancy at time of death
+agepos = 1:100 # consider 100 years (ages)
+ageposdisc = rep(NA,length(agepos))
+  for(index in 1:length(agepos)){
+    ageposdisc[index] = sum(1 / (1 + discountrateeffect)**(1:agepos[index]))
+  } #discounted number of years still to live
+
+## create array for discounting based on the age range (for YLL calculations)
+lifeexpatagedeathdisc =       array(dim =arraydim,ageposdisc[lifeexpatagedeath])
+lifeexpatagedeathdisc0_2 =    array(dim =arraydim,ageposdisc[lifeexpatagedeath0_2])
+lifeexpatagedeathdisc2_5 =    array(dim =arraydim,ageposdisc[lifeexpatagedeath2_5])
+lifeexpatagedeathdisc5_10 =   array(dim =arraydim,ageposdisc[lifeexpatagedeath5_10])
+lifeexpatagedeathdisc10_15 =  array(dim =arraydim,ageposdisc[lifeexpatagedeath10_15])
+lifeexpatagedeathdisc15over = array(dim =arraydim,ageposdisc[lifeexpatagedeath15over])
+
+## discount the total number of deaths
+deathsAMS0_2_disc =     deathsAMS0_2 * discountrateeffectarray[,,,,,]
+deathsAMS2_5_disc =     deathsAMS2_5 * discountrateeffectarray[,,,,,]
+deathsAMS5_10_disc =    deathsAMS5_10 * discountrateeffectarray[,,,,,]
+deathsAMS10_15_disc =   deathsAMS10_15 * discountrateeffectarray[,,,,,]
+deathsAMS15over_disc =  deathsAMS15over * discountrateeffectarray[,,,,,]
+```
+
+### DALYs - AMS
+```{r}
+### AMS cases
+## calculate number of deaths
+hospdeathsAMS_comp =    inputpararray['pr_death_inpt_comp',,,,,,] * hospcasesAMS_comp   # # inpatient deaths w/ complications
+hospdeathsAMS_nocomp =  inputpararray['pr_death_inpt_noComp',,,,,,] * hospcasesAMS_nocomp # # inpatient deaths w/o complications
+hospdeathsAMS =         hospdeathsAMS_nocomp + hospdeathsAMS_comp                       # total # inpatient deaths 
+## Calculate total number of deaths due to typhoid 
+nohospdeathsAMS =       nomedcasesAMS * inputpararray['pr_death_notrt',,,,,,]
+alldeathsAMS =          hospdeathsAMS + nohospdeathsAMS
+
+## YLLs - years of life lost due to premature mortality
+# yllhospAMS =    hospdeathsAMS * lifeexpatagedeath   # years of life lost due to premature inpatient death
+# yllnohospAMS =  nohospdeathsAMS * lifeexpatagedeath # years of life lost due to premature outpatient/no Rx death
+yllAMS =        (lifeexpatagedeath0_2 * deathsAMS0_2) +     # total years of life lost due to premature death
+                (lifeexpatagedeath2_5 * deathsAMS2_5) +  
+                (lifeexpatagedeath5_10 * deathsAMS5_10) +  
+                (lifeexpatagedeath10_15 * deathsAMS10_15) +  
+                (lifeexpatagedeath15over * deathsAMS15over)
+  
+## YLDs - years of life lost due to disability
+yldhospAMS_nocomp = hospcasesAMS_nocomp *                     # inpt w/o complications ylds 
+                    inputpararray['doi_severe',,,,,,] * 
+                    inputpararray['dalywt_sev_noComp',,,,,,]
+yldhospAMS_comp =   hospcasesAMS_comp *                       # inpt w/ complications ylds 
+                    inputpararray['doi_severe_comp',,,,,,] * 
+                    inputpararray['dalywt_sev_Comp',,,,,,]    
+yldhospAMS =        yldhospAMS_nocomp + yldhospAMS_comp       # total inpatient ylds
+yldoutAMS =         outcasesAMS *                             # outpatient ylds
+                    inputpararray['doi_moderate',,,,,,] * 
+                    inputpararray['dalywt_moderate',,,,,,]    
+yldnomedAMS =       nomedcasesAMS *                           # no treatment ylds
+                    inputpararray['doi_notrt',,,,,,] * 
+                    inputpararray['dalywt_no_trt',,,,,,]      
+yldnohospAMS =      yldoutAMS + yldnomedAMS                   # outpatient/no Rx ylds
+yldAMS =            yldhospAMS + yldoutAMS + yldnomedAMS      # total ylds typhoid illness
+
+## DALYs - diability-adjusted life-years
+# dalyhospAMS =   yllhospAMS + yldhospAMS     # inpatient DALYs
+# dalynohospAMS = yllnohospAMS + yldnohospAMS # outpatient/no Rx DALYs
+totdalysAMS =   yldAMS + yllAMS               # total number of DALYs
+
+## Discounting
+hospdeathsAMS_disc =    hospdeathsAMS * discountrateeffectarray[,,,,,]    # inpatient deaths 
+nohospdeathsAMS_disc =  nohospdeathsAMS * discountrateeffectarray[,,,,,]  # outpatient/no Rx deaths 
+alldeathsAMS_disc =     alldeathsAMS * discountrateeffectarray[,,,,,]     # typhoid deaths 
+## Note: needs to include discounted LIFE EXPECTANCY so cannot use same formula as for yld
+
+# yllhospAMS_disc =       hospdeathsAMS_disc * lifeexpatagedeathdisc[,,,,,]   # discounted inpatient ylls
+# yllnohospAMS_disc =     nohospdeathsAMS_disc * lifeexpatagedeathdisc[,,,,,] # discounted outpatient/no Rx ylls
+yllAMS_disc =   (lifeexpatagedeathdisc0_2 * deathsAMS0_2_disc) +      # discounted total ylls
+                (lifeexpatagedeathdisc2_5 * deathsAMS2_5_disc) +  
+                (lifeexpatagedeathdisc5_10 * deathsAMS5_10_disc) +  
+                (lifeexpatagedeathdisc10_15 * deathsAMS10_15_disc) +  
+                (lifeexpatagedeathdisc15over * deathsAMS15over_disc)                
+
+yldhospAMS_disc =       yldhospAMS * discountrateeffectarray[,,,,,]   # discounted inpatient ylds
+yldoutAMS_disc =        yldoutAMS * discountrateeffectarray[,,,,,]    # discounted outpatient ylds
+yldnomedAMS_disc =      yldnomedAMS * discountrateeffectarray[,,,,,]  # discounted no Rx ylds
+yldnohospAMS_disc =     yldnohospAMS * discountrateeffectarray[,,,,,] # discounted outpatient/no Rx ylds
+yldAMS_disc =           yldhospAMS_disc + yldnohospAMS_disc           # discountat total ylds
+# dalyhospAMS_disc =      yllhospAMS_disc + yldhospAMS_disc           # discounted inpatient DALYs
+# dalynohospAMS_disc =    yllnohospAMS_disc + yldnohospAMS_disc       # discounted outpatient/noRx DALYs
+totdalysAMS_disc =      yldAMS_disc + yllAMS_disc                     # discounted total DALYs
+```
+
+# Total outcomes overall
+```{r}
+### Sum AMR and AMS incidence (redundant unless an AMR component is added in)
+cases =             casesAMS
+tothosps =          hospcasesAMS
+totdeaths =         alldeathsAMS
+tottreatmentcost =  tottreatmentcostAMS
+yll =               yllAMS
+yld =               yldAMS
+totdalys =          totdalysAMS
+
+cases_disc =            casesAMS_disc
+tothosps_disc =         hospcasesAMS_disc
+totdeaths_disc =        alldeathsAMS_disc
+tottreatmentcost_disc = tottreatmentcostAMS_disc
+yll_disc =              yllAMS_disc
+yld_disc =              yldAMS_disc
+totdalys_disc =         totdalysAMS_disc
+```
+
+### Prepare output
+```{r}
+### incidence over time for no vaccination and each of the vaccination strategies:
+## array structure: list, in which each element is geo * incidence * scen * sample * vacstrat * year array
+## undiscounted output
+outputbyvacstratovertime_notdiscounted = list(cases = cases, tothosps = tothosps,
+                                             totdeaths = totdeaths,
+                                             tottreatmentcost = tottreatmentcost,
+                                             totcostvac = totcostvac, totcostrout = totcostrout,             
+                                             totcostcamp = totcostcamp, totcostboost = totcostboost,           
+                                             yll = yll, yld = yld, totdalys = totdalys)
+## discounted output
+outputbyvacstratovertime_discounted = list(cases_disc = cases_disc,
+                                          tothosps_disc = tothosps_disc,
+                                          totdeaths_disc = totdeaths_disc,
+                                          tottreatmentcost_disc = tottreatmentcost_disc,
+                                          totcostvac_disc = totcostvac_disc,
+                                          totcostrout_disc = totcostrout_disc,                
+                                          totcostcamp_disc = totcostcamp_disc,
+                                          totcostboost_disc = totcostboost_disc,              
+                                          yll_disc = yll_disc, yld_disc = yld_disc,
+                                          totdalys_disc = totdalys_disc)
+## save output array
+save(file = paste(wddata,"/",'outputbyvacstratovertime_notdiscounted.RData',sep =''), outputbyvacstratovertime_notdiscounted)
+save(file = paste(wddata,"/",'outputbyvacstratovertime_discounted.RData',sep =''),    outputbyvacstratovertime_discounted)
+```

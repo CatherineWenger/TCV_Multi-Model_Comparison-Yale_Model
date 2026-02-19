@@ -1,0 +1,339 @@
+---
+title: "Set up CEA params"
+author: "Catherine Wenger"
+date: "2025-02-24"
+output: html_document
+---
+
+###############################################################################
+# Evaluating the Impact and Cost-Effectiveness of Typhoid Conjugate Vaccine 
+#   Schedules across Diverse Settings: a Multi-Model Comparison 
+# 
+# Code to set up stochastic parameters and epidemiological data to run the cost-effectiveness analyses
+#
+# Created: Catherine Wenger Jan 2025
+###############################################################################
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(dplyr)
+library(ggplot2)
+set.seed(6789)
+```
+
+## Initial set-up specifications for the cost-effectiveness analysis (CEA)
+  # Choose scenarios and strategies to include
+```{r}
+## the original calculations include a 20 year time horizon, shorter time horizons can be analyzed by only selecting data up to ex. 10 years when doing net benefit calculations
+nyears =        20                                                # time horizon
+nsamples =      1000                                              # number of simulations
+incidencenames =   c("MediumSlow","HighSlow","VeryHighSlow",         # set which of the scenarios for incidence and waning to run (medium/high/very high, slow/fast)
+                  "MediumFast","HighFast","VeryHighFast")  
+scennames =     c("9mo","15mo")                                   # set which of the scenarios for youngest age of vaccination to run
+vacstratnames = c("No_vax","Routine_U2_W","Routine_2_W",
+                  "Routine_5_W","Booster_5_W")#,"Booster_5_10_W") # set which of the vaccine strategies to run
+                  # "Routine_U2_WO","Routine_2_WO","Routine_5_WO",
+                  # "Booster_5_WO","Booster_5_10_WO")             # strategies without a catch-up campaign
+geonames =      c("Africa","Asia")                                # set which of the two geographical regions to run (Africa, Asia)
+samplenames =   c(1:nsamples)                                     # vector of each sample number
+
+yearnames =     c(1:nyears)                                       # vector of each year number
+nvacstrat =     length(vacstratnames)                             # number of vaccine strategies included
+discountratecost = discountrateeffect = 0.03                      # yearly discounting rate for costs and health outcomes
+
+## If a shorter time horizon will be analyzed (ex. 10 years) vaccine strategies with a component introduced outside of the horizon should be removed (ex. 2 booster strategy)
+vaccomparisonnames = c("novaxVSroutU2W","novaxVSrout2W","novaxVSrout5W","novaxVSboost5W")#,"novaxVSboost510W"),
+                       #"novaxVSroutU2WO","novaxVSrout2WO","novaxVSrout5WO","novaxVSboost5WO","novaxVSboost510WO") # without campaign strategies are evaluated in a separate analysis
+
+num_scens =     length(incidencenames) * length(scennames) * length(geonames) # number of combinations of scenarios
+
+## create a working directory to save results
+wd ="~/Cost_effectiveness_model/"
+date = format(Sys.Date(), format = "%d-%m-%y")    # Date for file name
+results_folder = paste0("Results_",date)
+wd = paste0(wd,results_folder)
+wddata = paste0(wd,"/Data")
+```
+
+### Array Structure - create an array to store the stochastic parameters for the CEA
+## [inputparnames (54), geonames (2), incidencenames (6), scennames (2), samplenames (1000), vacstratnames (6), yearnames (20)]
+```{r}
+## create list of names of the parameters used in CEA calculations
+inputparnames=c(
+  ## Dynamic model
+  'population',
+  'I_cases','I_cases0_2','I_cases2_5','I_cases5_10','I_cases10_15','I_cases15over',
+  'I_nrdosesroutine','I_nrdosescampaign','I_nrdosesbooster',
+  'vaccinewaning0','vaccinewaning1','vaccinewaning2',
+  'vaccineeff0','vaccineeff1','vaccineeff2',
+  'vaxcoverage_camp','vaxcoverage_rout9','vaxcoverage_rout15','vaxcoverage_rout2','vaxcoverage_boost',
+  'chronic_carrier',
+  ## Health-seeking probabilities
+  'pr_seek','pr_inpt','pr_outpt','pr_complications',
+  ## DALYs
+  'dalywt_moderate','dalywt_sev_noComp','dalywt_sev_Comp','dalywt_no_trt',
+  ## Healthcare costs
+  'cost_inpt_noComp_trt15u','cost_inpt_comp_trt15u','cost_outpt_trt15u','cost_no_trt15u',
+  'cost_inpt_noComp_trt15o','cost_inpt_comp_trt15o','cost_outpt_trt15o','cost_no_trt15o',
+  ## Vaccination costs
+  'cost_vax_dose','cost_safty_inj','cost_del_rout','cost_del_camp','cost_del_boost',
+  ## Disease probabilities & parameters
+  'pr_death_notrt','pr_death_inpt_comp','pr_death_inpt_noComp','pr_death_outpt',
+  'doi_severe','doi_severe_comp','doi_moderate','doi_notrt',
+  'life_expectancy'
+  )
+## set array dimensions
+inputpardim=c(length(inputparnames),
+              length(geonames),
+              length(incidencenames),
+              length(scennames),
+              length(samplenames),
+              length(vacstratnames),
+              length(yearnames))
+## set array dimension names
+inputpardimnames=list(inputparnames,
+                      geonames,
+                      incidencenames,
+                      scennames,
+                      samplenames,
+                      vacstratnames,
+                      yearnames)
+## Creates the empty array to be populated for calculations
+inputpararray=array(NA,dim=inputpardim,dimnames=inputpardimnames)
+```
+
+# Get Data
+```{r}
+## Load in VE and Waning uncertainty estimates for each of the waning scenarios
+load("~/Transmission_dynamic_model/search_grid_slow.Rdata")
+slow <- search_grid
+load("~/Transmission_dynamic_model/search_grid_fast.Rdata")
+fast <- search_grid
+dir.create(wddata, recursive = TRUE, showWarnings = FALSE)
+
+## Get number of cases for each of the scenarios and vaccine strategies over time 
+## this function will run "load_data.R" to compile the simulation outputs from the transmission dynamic model
+source(here("Cost_effectiveness_model","MakeCases.R"))         
+save_cases <- list(
+  cases = cases,
+  cases0_2 = cases0_2,
+  cases2_5 = cases2_5,
+  cases5_10 = cases5_10,
+  cases10_15 = cases10_15,
+  cases15over = cases15over,
+  population = population
+)
+save(save_cases,file=here("Cost_effectiveness_model","cases.Rdata"))
+
+## Get number of doses for each of the scenarios and vaccine strategies over time
+source(here("Cost_effectiveness_model","MakeDoses.R"))         
+save <- list(nrdosesroutine = nrdosesroutine,
+             nrdosescampaign = nrdosescampaign,
+             nrdosesbooster = nrdosesbooster)
+save(save,file=here("Cost_effectiveness_model","doses.Rdata"))
+
+## remove the simulation data frames loaded to extract cases and doses
+rm(list=ls(pattern="^Scenario_"))  
+```
+
+## Epi data
+# Cases / Doses / Waning 
+```{r}
+## Excludes year 1 (pre-vaccination year) from the cases and doses data frames (years 2-21 equals 20 years after introduction)
+inputpararray['population',,,,,,] =         population[,,,,1:length(vacstratnames),2:(nyears+1)]      # population size
+inputpararray['I_cases',,,,,,] =            cases[,,,,1:length(vacstratnames),2:(nyears+1)]           # total cases 
+inputpararray['I_cases0_2',,,,,,] =         cases0_2[,,,,1:length(vacstratnames),2:(nyears+1)]        # cases for ages 0-2y
+inputpararray['I_cases2_5',,,,,,] =         cases2_5[,,,,1:length(vacstratnames),2:(nyears+1)]        # cases for ages 2-<5y
+inputpararray['I_cases5_10',,,,,,] =        cases5_10[,,,,1:length(vacstratnames),2:(nyears+1)]       # cases for ages 5-<10y
+inputpararray['I_cases10_15',,,,,,] =       cases10_15[,,,,1:length(vacstratnames),2:(nyears+1)]      # cases for ages 10-<15y
+inputpararray['I_cases15over',,,,,,] =      cases15over[,,,,1:length(vacstratnames),2:(nyears+1)]     # cases for ages 15+y
+
+inputpararray['I_nrdosesroutine',,,,,,] =   nrdosesroutine[,,,,1:length(vacstratnames),2:(nyears+1)]  # number of doses for routine vaccination
+inputpararray['I_nrdosescampaign',,,,,,] =  nrdosescampaign[,,,,1:length(vacstratnames),2:(nyears+1)] #  number of doses for catch-up campaigns
+inputpararray['I_nrdosesbooster',,,,,,] =   nrdosesbooster[,,,,1:length(vacstratnames),2:(nyears+1)]  # number of doses for booster vaccination
+
+## Allocate uncertainty parameters based on the waning scenarios
+for (s in 1:nsamples) {
+  ## slow waning scenario - waning and vaccine effectiveness
+  for (b in c("MediumS", "HighS", "VeryHighS")) {
+    inputpararray['vaccinewaning0', , b, ,s , ,] <- slow$omegav0[s]
+    inputpararray['vaccinewaning1', , b, ,s , ,] <- slow$omegav1[s]
+    inputpararray['vaccinewaning2', , b, ,s , ,] <- slow$omegav2[s]
+    inputpararray['vaccineeff0', , b, ,s , ,] <- slow$VE0[s]
+    inputpararray['vaccineeff1', , b, ,s , ,] <- slow$VE1[s]
+    inputpararray['vaccineeff2', , b, ,s , ,] <- slow$VE2[s]
+  }
+  ## fast waning scenario - waning and vaccine effectiveness
+  for (b in c("MediumF", "HighF", "VeryHighF")) {
+    inputpararray['vaccinewaning0', , b, ,s , ,] <- fast$omegav0[s]
+    inputpararray['vaccinewaning1', , b, ,s , ,] <- fast$omegav1[s]
+    inputpararray['vaccinewaning2', , b, ,s , ,] <- fast$omegav2[s]
+    inputpararray['vaccineeff0', , b, ,s , ,] <- fast$VE0[s]
+    inputpararray['vaccineeff1', , b, ,s , ,] <- fast$VE1[s]
+    inputpararray['vaccineeff2', , b, ,s , ,] <- fast$VE2[s]
+  }
+  ## vaccine coverage samples
+  inputpararray['vaxcoverage_camp', , , ,s , ,]   <- slow$vcn[s]
+  inputpararray['vaxcoverage_rout9', , , ,s , ,]  <- slow$vcr9[s]
+  inputpararray['vaxcoverage_rout15', , , ,s , ,] <- slow$vcr15[s]
+  inputpararray['vaxcoverage_rout2', , , ,s , ,]  <- slow$vcr2[s]
+  inputpararray['vaxcoverage_boost', , , ,s , ,]  <- slow$vcrb[s]
+  ## relative infectiousness of chronic carrier (rC) samples
+  inputpararray['chronic_carrier', , , ,s , ,]    <- slow$rC[s]
+}
+```
+
+## Health-seeking probabilities
+```{r}
+##                    index 1 = Africa,                     index 2 = Asia
+pr_seek =             rbind(rbeta(nsamples,17.390,11.837),  rbeta(nsamples,17.390,11.837))  # P(seeking treatment) 
+pr_inpt =             rbind(rbeta(nsamples,3.630, 9.723),   rbeta(nsamples,3.199,  21.796)) # P(inpatient treatment|seek treatment)
+pr_outpt =            1 - pr_inpt                                                           # P(inpatient treatment|seek treatment)
+pr_notrt =            1 - pr_seek                                                           # P(not seeking treatment)
+pr_complications =    rbind(rbeta(nsamples,14.112, 29.448), rbeta(nsamples,0.276, 4.445))   # P(complications|inpatient treatment)
+pr_no_complications = 1 - pr_complications                                                  # P(no complications|inpatient treatment)
+## antimicrobial sensitive = AMS | antimicrobial resistant = AMR
+
+## insert samples into parameter array
+for (z in 1:2){
+  for (s in 1:nsamples) {
+    inputpararray['pr_seek', z, , , s, , ] <-           pr_seek[z,s]
+    inputpararray['pr_inpt', z, , , s, , ] <-           pr_inpt[z,s]
+    inputpararray['pr_outpt', z, , , s, , ] <-          pr_outpt[z,s]
+    inputpararray['pr_complications', z, , , s, , ] <-  pr_complications[z,s]
+  }
+}
+```
+
+## DALYs
+```{r}
+##                  index 1 = Africa,                      index 2 = Asia
+daly_wt_med =       rbeta(nsamples,21.823, 403.755)                                         # DALY weight is equal for outpatient and no treatment typhoid
+
+dalywt_moderate =   rbind(daly_wt_med, daly_wt_med)                                         # DALY weight for moderate (outpatient) typhoid
+dalywt_sev_noComp = rbind(rbeta(nsamples,23.279, 148.877), rbeta(nsamples,23.279, 148.877)) # DALY weight for severe (inpatient) typhoid w/ complications
+dalywt_sev_Comp =   rbind(rbeta(nsamples,21.837, 45.129),  rbeta(nsamples,21.837, 45.129))  # DALY weight for severe (inpatient) typhoid w/o complication
+dalywt_no_trt =     rbind(daly_wt_med, daly_wt_med)                                         # DALY weight for mild (no treatment) typhoid
+
+## insert samples into parameter array
+for (z in 1:2){
+  for (s in 1:nsamples) {
+    inputpararray['dalywt_moderate', z, , , s, , ] <-   dalywt_moderate[z,s]
+    inputpararray['dalywt_sev_noComp', z, , , s, , ] <- dalywt_sev_noComp[z,s]
+    inputpararray['dalywt_sev_Comp', z, , , s, , ] <-   dalywt_sev_Comp[z,s]
+    inputpararray['dalywt_no_trt', z, , , s, , ] <-     dalywt_no_trt[z,s]
+  }
+}
+```
+
+## Healthcare Costs
+```{r}
+## Under 15yrs                index 1 = Africa,                     index 2 = Asia
+inpt_u15cost_africa = rlnorm(nsamples,5.605, 0.158)
+inpt_u15cost_asia = rlnorm(nsamples,5.368, 0.583)
+cost_inpt_noComp_trt15under = rbind(inpt_u15cost_africa,            inpt_u15cost_asia)              # $ inpt Rx w/o complications  rgamma(n = nsamples,shape = 0.717,scale = 78.9)
+cost_inpt_comp_trt15under =   rbind(inpt_u15cost_africa,            inpt_u15cost_asia)              # $ inpt Rx w/ complications  
+cost_outpt_trt15under =       rbind(rlnorm(nsamples,3.903, 0.0948), rlnorm(nsamples,3.752, 0.761))  # $ outpt Rx rgamma(n = nsamples,shape = 1.11,scale = 1.46)
+cost_no_trt15under =          rbind(rep(0,nsamples),                rep(0,nsamples))                # $ no treatment
+## Over 15yrs                 index 1 = Africa,                     index 2 = Asia
+inpt_o15cost_africa = rlnorm(nsamples,6.039, 0.179)
+inpt_o15cost_asia = rlnorm(nsamples,5.368, 0.583)
+cost_inpt_noComp_trt15over =  rbind(inpt_o15cost_africa,            inpt_o15cost_asia)              # $ inpt Rx w/o complications  rgamma(n = nsamples,shape = 0.717,scale = 78.9)
+cost_inpt_comp_trt15over =    rbind(inpt_o15cost_africa,            inpt_o15cost_asia)              # $ inpt Rx w/ complications 
+cost_outpt_trt15over =        rbind(rlnorm(nsamples,3.814, 0.129),  rlnorm(nsamples,3.752, 0.761))  # $ outpt Rx rgamma(n = nsamples,shape = 1.11,scale = 1.46)
+cost_no_trt15over =           rbind(rep(0,nsamples),                rep(0,nsamples))                # $ no treatment
+
+## insert samples into parameter array
+for (z in 1:2){
+  for (s in 1:nsamples) {
+    ## AMS
+    inputpararray['cost_inpt_noComp_trt15u', z, , , s, , ] <-  cost_inpt_noComp_trt15under[z,s]
+    inputpararray['cost_inpt_comp_trt15u', z, , , s, , ] <-    cost_inpt_comp_trt15under[z,s]
+    inputpararray['cost_outpt_trt15u', z, , , s, , ] <-        cost_outpt_trt15under[z,s]
+    inputpararray['cost_no_trt15u', z, , , s, , ] <-           cost_no_trt15under[z,s]
+    inputpararray['cost_inpt_noComp_trt15o', z, , , s, , ] <-  cost_inpt_noComp_trt15over[z,s]
+    inputpararray['cost_inpt_comp_trt15o', z, , , s, , ] <-    cost_inpt_comp_trt15over[z,s]
+    inputpararray['cost_outpt_trt15o', z, , , s, , ] <-        cost_outpt_trt15over[z,s]
+    inputpararray['cost_no_trt15o', z, , , s, , ] <-           cost_no_trt15over[z,s]
+  }
+}
+```
+
+## Vaccination costs
+```{r}
+##                index 1 = Africa,                          index 2 = Asia
+cost_vax_dose =   rbind(rep(1.5,nsamples),                   rep(1.5,nsamples))                   # $/dose of vaccine
+cost_safty_inj =  rbind(rlnorm(n = nsamples,-1.222, 0.0260), rlnorm(n = nsamples,-1.222, 0.0260)) # $/dose for safety & injection
+cost_del_rout =   rbind(rlnorm(n = nsamples,0.833, 0.0817),  rlnorm(n = nsamples,0.349, 0.210))   # $/dose for routine delivery
+cost_del_camp =   rbind(rlnorm(n = nsamples,-0.700, 0.0615), rlnorm(n = nsamples,-0.635, 0.0720)) # $/dose for campaign delivery
+cost_del_boost =  rbind(rlnorm(n = nsamples,0.209,0.281),    rlnorm(n = nsamples,0.209,0.281))    # $/dose for booster delivery 
+
+## insert samples into parameter array
+for (z in 1:2){
+  for (s in 1:nsamples) {
+    inputpararray['cost_vax_dose', z, , , s, , ] <-   cost_vax_dose[z,s]
+    inputpararray['cost_safty_inj', z, , , s, , ] <-  cost_safty_inj[z,s]
+    inputpararray['cost_del_rout', z, , , s, , ] <-   cost_del_rout[z,s]
+    inputpararray['cost_del_camp', z, , , s, , ] <-   cost_del_camp[z,s]
+    inputpararray['cost_del_boost', z, , , s, , ] <-  cost_del_boost[z,s]
+  }
+}
+```
+
+## Disease probabilities & parameters
+# CFR / Duration of illness / Life Expectancy
+```{r}
+##                            index 1 = Africa,                                    index 2 = Asia
+overall_CFR_africa = rbeta(nsamples,1.298, 66.619)
+overall_CFR_asia = rbeta(nsamples,5.521, 2739.618)
+pr_death_notrt =        rbind(overall_CFR_africa,                                  overall_CFR_asia)  # P(death|no treatment)
+pr_death_inpt_comp =    rbind(overall_CFR_africa,                                  overall_CFR_asia)  # P(death|inpatient w/ complications)
+pr_death_inpt_noComp =  rbind(overall_CFR_africa,                                  overall_CFR_asia)  # P(death|inpatient w/o complications)
+pr_death_outpt =        rbind(overall_CFR_africa,                                  overall_CFR_asia)  # P(death|outpatient)
+
+doi_severe_all = rgamma(n = nsamples,shape = 1.669,scale = 1/19.368)
+doi_severe =            rbind(doi_severe_all,                                      doi_severe_all)                                      # duration of illness, severe w/o comp
+doi_severe_comp =       rbind(doi_severe_all,                                      doi_severe_all)                                      # duration of illness, severe w/ comp
+doi_moderate =          rbind(rgamma(n = nsamples,shape = 1.400,scale = 1/13.001), rgamma(n = nsamples,shape = 1.400,scale = 1/13.001)) # duration of illness, moderate typhoid
+doi_notrt =             rbind(rgamma(n = nsamples,shape = 1.683,scale = 1/10.918), rgamma(n = nsamples,shape = 1.683,scale = 1/10.918)) # duration of illness, mild typhoid
+
+life_expectancy =       rbind(rep(64.02,nsamples),                                 rep(74.76,nsamples))          # Life expectancy
+  
+for (z in 1:2){
+  for (s in 1:nsamples) {
+    inputpararray['pr_death_notrt', z, , , s, , ] <-        pr_death_notrt[z,s]
+    inputpararray['pr_death_inpt_comp', z, , , s, , ] <-    pr_death_inpt_comp[z,s]
+    inputpararray['pr_death_inpt_noComp', z, , , s, , ] <-  pr_death_inpt_noComp[z,s]
+    inputpararray['pr_death_outpt', z, , , s, , ] <-        pr_death_outpt[z,s]
+    inputpararray['doi_severe', z, , , s, , ] <-            doi_severe[z,s]
+    inputpararray['doi_severe_comp', z, , , s, , ] <-       doi_severe_comp[z,s]
+    inputpararray['doi_moderate', z, , , s, , ] <-          doi_moderate[z,s]
+    inputpararray['doi_notrt', z, , , s, , ] <-             doi_notrt[z,s]
+    inputpararray['life_expectancy', z, , , s, , ] <-       life_expectancy[z,s]
+  }
+}
+```
+
+## Discounting array
+```{r}
+## create the discounting factor to be applied across the time horizon for costs and health benefits
+discountratecostovertime =    1 / ((1 + discountratecost) ** (0:(nyears-1)))    # first year no discounting
+discountrateeffectovertime =  1 / ((1 + discountrateeffect) ** (0:(nyears-1)))  # first year no discounting
+
+## this is an array that is applied to the individual elements in the array created above
+discountratecostarray = discountrateeffectarray = aperm(array(discountratecostovertime,
+                                                        dim=c(nyears,
+                                                              length(geonames),
+                                                              length(incidencenames),
+                                                              length(scennames),
+                                                              nsamples,
+                                                              length(vacstratnames))),
+                                                        c(2,3,4,5,6,1))
+```
+
+## Save the array set up with data and sampled parameters
+```{r}
+output <- list(discountrateeffectarray,discountratecostarray,inputpararray)
+save(output,file=here(wddata,"par_arrays.Rdata"))
+```
